@@ -16,34 +16,37 @@ from pydantic import ValidationError as PydanticValidationError
 from . import __version__, config
 from .errors import ArtifactStoreError, ValidationError
 from .models import (
-    CreateDiagramPngDownloadLinksResponse,
+    CreateDiagramPngResponse,
     GraphDocument,
     OutputSpec,
-    SkillLinkResponse,
+    SkillResponse,
 )
 from .rendering import render_details_png, render_graph_png
 from .scenes import details_scene, diagram_to_internal, graph_scene
 
 
-def get_drawflow_skill_link(version: str = "latest", client: str = "codex") -> dict[str, Any]:
+def get_drawflow_skill(version: str = "latest", client: str = "codex") -> dict[str, Any]:
     path = config.skill_path(version)
-    sha = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else ""
+    raw = path.read_bytes() if path.exists() else b""
+    sha = hashlib.sha256(raw).hexdigest() if raw else ""
+    markdown = raw.decode("utf-8") if raw else ""
     download_version = __version__ if version == "latest" else version
-    response = SkillLinkResponse.model_validate({
+    response = SkillResponse.model_validate({
         "skill": {
             "name": "drawflow-diagram",
             "version": __version__,
             "client": client,
             "downloadUrl": f"{config.public_base_url()}/downloads/skills/drawflow/{download_version}/SKILL.md",
             "sha256": sha,
+            "markdown": markdown,
             "expiresAt": None,
         },
-        "usage": "Use this skill to create DrawFlow Graph DSL, then call create_diagram_png_download_links.",
+        "usage": "Use this skill to create DrawFlow Graph DSL, then call create_diagram_png.",
     })
     return response.model_dump(mode="json")
 
 
-def create_diagram_png_download_links(
+def create_diagram_png(
     diagram: GraphDocument | dict[str, Any],
     output: OutputSpec | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -81,7 +84,7 @@ def create_diagram_png_download_links(
         .isoformat()
         .replace("+00:00", "Z")
     )
-    response = CreateDiagramPngDownloadLinksResponse.model_validate({
+    response = CreateDiagramPngResponse.model_validate({
         "diagramId": diagram_id,
         "status": "ready",
         "expiresAt": expires_at,

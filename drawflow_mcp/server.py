@@ -32,8 +32,8 @@ from starlette.responses import PlainTextResponse, Response
 
 from . import __version__, config
 from .errors import DrawFlowError
-from .pipeline import create_diagram_png_download_links as create_links
-from .pipeline import get_drawflow_skill_link as get_skill_link
+from .pipeline import create_diagram_png as create_links
+from .pipeline import get_drawflow_skill as get_skill_link
 
 
 ARTIFACT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
@@ -45,8 +45,8 @@ mcp = FastMCP(
     instructions=(
         "Render DrawFlow Graph DSL documents into two PNG files: a concise graph image "
         "and a details image. Every returned download URL points to exactly one PNG file. "
-        "Agents should first call get_drawflow_skill_link, read the returned Markdown skill, "
-        "and then call create_diagram_png_download_links with a complete GraphDocument."
+        "Agents should first call get_drawflow_skill, read the returned Markdown skill, "
+        "and then call create_diagram_png with a complete GraphDocument."
     ),
 )
 
@@ -57,17 +57,17 @@ mcp = FastMCP(
 
 
 @mcp.tool
-def get_drawflow_skill_link(version: str = "latest", client: str = "codex") -> dict[str, Any]:
+def get_drawflow_skill(version: str = "latest", client: str = "codex") -> dict[str, Any]:
     """Return the DrawFlow skill URL; the URL serves raw SKILL.md Markdown text."""
     return get_skill_link(version=version, client=client)
 
 
 @mcp.tool
-def create_diagram_png_download_links(
+def create_diagram_png(
     diagram: dict[str, Any],
     output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Render graph/details PNG links. First call get_drawflow_skill_link and read the skill for DSL and visual-label rules."""
+    """Render graph/details PNG links. First call get_drawflow_skill and read the skill for DSL and visual-label rules."""
     try:
         return create_links(diagram=diagram, output=output)
     except DrawFlowError as exc:

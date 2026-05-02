@@ -10,16 +10,16 @@ from .graph import (
     NodeSpec,
 )
 from .responses import (
-    CreateDiagramPngDownloadLinksResponse,
+    CreateDiagramPngResponse,
     DownloadDescriptor,
     ImageDescriptor,
     SkillDescriptor,
-    SkillLinkResponse,
+    SkillResponse,
 )
 
 __all__ = [
     "ArrowSpec",
-    "CreateDiagramPngDownloadLinksResponse",
+    "CreateDiagramPngResponse",
     "DetailSpec",
     "DetailsOutputSpec",
     "DownloadDescriptor",
@@ -31,5 +31,5 @@ __all__ = [
     "NodeSpec",
     "OutputSpec",
     "SkillDescriptor",
-    "SkillLinkResponse",
+    "SkillResponse",
 ]

@@ -13,10 +13,11 @@ class SkillDescriptor(BaseModel):
     client: str
     downloadUrl: str
     sha256: str
+    markdown: str
     expiresAt: str | None = None
 
 
-class SkillLinkResponse(BaseModel):
+class SkillResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     skill: SkillDescriptor
@@ -42,7 +43,7 @@ class DownloadDescriptor(BaseModel):
     image: ImageDescriptor
 
 
-class CreateDiagramPngDownloadLinksResponse(BaseModel):
+class CreateDiagramPngResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     diagramId: str

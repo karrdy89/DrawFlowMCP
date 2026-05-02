@@ -4,7 +4,7 @@ Use this skill when you need to create an architecture diagram, flowchart, or sy
 
 ## Output Contract
 
-Call `create_diagram_png_download_links` once with one complete `GraphDocument`. The server returns two PNG download links:
+Call `create_diagram_png` once with one complete `GraphDocument`. The server returns two PNG download links:
 
 - `graph` — concise architecture image (nodes, edges, arrows, short labels, clusters).
 - `details` — readable detail image with full node/edge descriptions.
@@ -14,7 +14,7 @@ Each download URL points to exactly one PNG file. There are no ZIP, SVG, JSON, P
 ### Tool call signature
 
 ```jsonc
-// Tool name: create_diagram_png_download_links
+// Tool name: create_diagram_png
 // Arguments (the GraphDocument is passed under "diagram", NOT at the top level):
 {
   "diagram": { /* GraphDocument — see "GraphDocument Shape" below */ },
