@@ -1,0 +1,28 @@
+services:
+  drawflow:
+    build: .
+    ports:
+      - "8765:8765"
+    command: ["python", "-m", "drawflow_mcp.server", "--transport", "http", "--host", "0.0.0.0", "--port", "8765"]
+    environment:
+      DRAWFLOW_ARTIFACT_DIR: "/data/artifacts"
+      # PUBLIC_BASE_URL is auto-derived from --host/--port; pin it here
+      # if you reverse-proxy the server behind a different external URL.
+      # DRAWFLOW_PUBLIC_BASE_URL: "https://drawflow.example.com"
+    volumes:
+      - drawflow-artifacts:/data/artifacts
+
+  drawflow-stdio:
+    build: .
+    profiles:
+      - stdio
+    command: ["python", "-m", "drawflow_mcp.server", "--transport", "stdio"]
+    stdin_open: true
+    environment:
+      DRAWFLOW_PUBLIC_BASE_URL: "http://127.0.0.1:8765"
+      DRAWFLOW_ARTIFACT_DIR: "/data/artifacts"
+    volumes:
+      - drawflow-artifacts:/data/artifacts
+
+volumes:
+  drawflow-artifacts:
