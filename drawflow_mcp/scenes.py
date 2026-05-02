@@ -106,6 +106,7 @@ def details_scene(diagram: dict[str, Any], details_output: dict[str, Any]) -> di
             "width": details_output["width"],
             "maxHeight": details_output["maxHeight"],
             "scale": details_output["scale"],
+            "autoGrow": details_output.get("autoGrow", False),
         },
         "sections": sections,
     }

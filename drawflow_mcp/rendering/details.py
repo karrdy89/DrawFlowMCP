@@ -37,7 +37,20 @@ def _render(scene: dict[str, Any], output_path: Path) -> dict[str, int | bool]:
     probe_draw = ImageDraw.Draw(probe)
     card_width = render_width - s(96, render_scale)
     needed = _measure_total_height(probe_draw, scene, card_width, render_scale)
-    max_height = int(scene["canvas"].get("maxHeight", 4000)) * render_scale
+    auto_grow = bool(scene["canvas"].get("autoGrow", False))
+    request_max = int(scene["canvas"].get("maxHeight", 4000)) * render_scale
+    # `autoGrow=True` means: never truncate. `maxHeight` is treated as the
+    # MINIMUM height (so the existing min-canvas semantics still hold), and
+    # the canvas grows to fit `needed` even if that's bigger than maxHeight.
+    if auto_grow:
+        # Same absolute ceiling as the model's maxHeight upper bound so we
+        # never produce a canvas wildly bigger than callers can opt into
+        # explicitly. If even this isn't enough, the truncation banner kicks
+        # back in.
+        ceiling = 24000 * render_scale
+        max_height = min(ceiling, max(request_max, needed))
+    else:
+        max_height = request_max
     height = max(min(needed, max_height), s(600, render_scale))
     truncated = needed > max_height
 

@@ -178,9 +178,10 @@ class DetailsOutputSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     width: Annotated[int, Field(ge=600, le=4000)] = 1600
-    maxHeight: Annotated[int, Field(ge=800, le=8000)] = 4000
+    maxHeight: Annotated[int, Field(ge=800, le=24000)] = 4000
     scale: Annotated[int, Field(ge=1, le=3)] = 2
     layout: Literal["cards"] = "cards"
+    autoGrow: bool = False
 
 
 class OutputSpec(BaseModel):

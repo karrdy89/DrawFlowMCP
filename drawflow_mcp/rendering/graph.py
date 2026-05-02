@@ -559,11 +559,23 @@ def _route_edge(
     # channel routing). The strongest signal is tgt_off (target port
     # index) since fan-in is what makes lanes overlap.
     channel_off = tgt_off + 0.5 * src_off
+    # Build the actual blocker set from the L/S polyline that just failed,
+    # not from the diagonal start→end. The polyline can pierce a node
+    # whose bbox the diagonal misses (e.g. when the bend's horizontal
+    # arm crosses a node sitting at the same y as the source).
+    polyline_blockers = [
+        box for box in obstacles
+        if _polyline_hits_any(primary, [box], margin)
+    ]
     detour = _detour_with_ports(
-        start, end, src_side, tgt_side, obstacles, margin, scale, channel_off,
+        start, end, src_side, tgt_side,
+        polyline_blockers if polyline_blockers else obstacles,
+        margin, scale, channel_off,
         soft_obstacles=soft_obstacles,
         claimed_h_lanes=claimed_h_lanes,
         claimed_v_lanes=claimed_v_lanes,
+        pre_filtered=bool(polyline_blockers),
+        all_obstacles=obstacles,
     )
     if detour and not _polyline_hits_any(detour, obstacles, margin):
         return detour
@@ -689,6 +701,8 @@ def _detour_with_ports(
     soft_obstacles: list[tuple[int, int, int, int]] | None = None,
     claimed_h_lanes: list[tuple[float, float, float]] | None = None,
     claimed_v_lanes: list[tuple[float, float, float]] | None = None,
+    pre_filtered: bool = False,
+    all_obstacles: list[tuple[int, int, int, int]] | None = None,
 ) -> list[Point] | None:
     """When the primary L/S route hits a non-endpoint node, route AROUND
     the obstacle band. Detour direction is chosen by:
@@ -698,12 +712,23 @@ def _detour_with_ports(
          path stays clear of cluster headers.
     `soft_obstacles` (source/target's own clusters) widen the union band
     so the detour lane is pushed past their borders too, but they aren't
-    used for the hit-test — the polyline is allowed to traverse them."""
-    blocking = [
-        (box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin)
-        for box in obstacles
-        if _segment_intersects_box(start, end, (box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin))
-    ]
+    used for the hit-test — the polyline is allowed to traverse them.
+    When `pre_filtered=True` the caller has already determined which
+    obstacles must be detoured around (typically by polyline-hit test) so
+    we skip the straight-line filter — that filter misses cases where the
+    L/S polyline pierces a node whose bbox the diagonal start→end happens
+    to miss."""
+    if pre_filtered:
+        blocking = [
+            (box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin)
+            for box in obstacles
+        ]
+    else:
+        blocking = [
+            (box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin)
+            for box in obstacles
+            if _segment_intersects_box(start, end, (box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin))
+        ]
     if not blocking:
         return None
     soft_obstacles = soft_obstacles or []
@@ -735,76 +760,131 @@ def _detour_with_ports(
         sign_bias = s(12, scale) if off < 0 else 0
         return abs(off) + sign_bias
 
+    # Inflated obstacle list for downstream hit-tests (segment-vs-box).
+    # When the caller pre-filtered `obstacles` to a small subset, hit-test
+    # MUST still run against the complete obstacle set so detours don't
+    # silently hop over an unrelated cluster/node on the way around.
+    hit_test_source = all_obstacles if all_obstacles is not None else obstacles
+    obstacles_inflated = [
+        (box[0] - margin, box[1] - margin, box[2] + margin, box[3] + margin)
+        for box in hit_test_source
+    ]
+
+    def _segment_clears_obstacles(a: Point, b: Point) -> bool:
+        for box in obstacles_inflated:
+            if _segment_intersects_box(a, b, box):
+                return False
+        return True
+
+    def _walk_perpendicular(
+        anchor: Point, lane_coord: float, init_offset: float, sign: int,
+        axis_horizontal: bool,
+    ) -> float:
+        """Walk the perpendicular stub away from `anchor` until the
+        stub segment from anchor to (lane on the other axis) clears every
+        obstacle. axis_horizontal=True means the stub is VERTICAL (we move
+        x). Returns the signed offset that produces a clean stub."""
+        def _hits(off: float) -> bool:
+            if axis_horizontal:
+                x = anchor[0] + off
+                return not _segment_clears_obstacles((x, anchor[1]), (x, lane_coord))
+            y = anchor[1] + off
+            return not _segment_clears_obstacles((anchor[0], y), (lane_coord, y))
+        if not _hits(init_offset):
+            return init_offset
+        for k in range(1, 60):
+            cand = init_offset + sign * lane_step * k
+            if not _hits(cand):
+                return cand
+        return init_offset
+
+    lane = _lane(channel_off)
+
     if horizontal:
         mid_y = (start[1] + end[1]) / 2
-        above = union_y1 - gap
-        below = union_y2 + gap
-        d_above = abs(mid_y - above)
-        d_below = abs(mid_y - below)
-        lane = _lane(channel_off)
-        if d_above < d_below * 0.66:
-            detour_y = above - lane
-            bias = -1
-        elif d_below < d_above * 0.66:
-            detour_y = below + lane
-            bias = +1
+        above_seed = union_y1 - gap - lane
+        below_seed = union_y2 + gap + lane
+        # Try the closer side first, then the other, then a wide outward
+        # walk on each side. The first candidate whose polyline clears all
+        # obstacles wins; otherwise pick the one with the fewest hits.
+        d_above = abs(mid_y - above_seed); d_below = abs(mid_y - below_seed)
+        if d_above < d_below:
+            ordered = [(above_seed, -1, "above"), (below_seed, +1, "below")]
         else:
-            detour_y = below + lane  # tie-breaker: prefer below
-            bias = +1
-        # Now ask: is this y already claimed by another edge in the same
-        # x-range? If so, walk away from existing lanes until free.
-        x_lo = min(start[0], end[0])
-        x_hi = max(start[0], end[0])
-        detour_y = _find_free_lane(detour_y, x_lo, x_hi, claimed_h_lanes, min_sep, lane_step, bias)
-        # Adjust the entry/exit stub x-coords so the vertical drop from
-        # the source (or rise into the target) doesn't run parallel to a
-        # nearby cluster border or another claimed vertical lane.
-        src_offset, tgt_offset = 0.0, 0.0
-        if src_side in ("left", "right"):
-            sign = 1 if src_side == "right" else -1
-            src_x_initial = start[0] + sign * ext
-            y_lo = min(start[1], detour_y); y_hi = max(start[1], detour_y)
-            src_x = _find_free_lane(src_x_initial, y_lo, y_hi, claimed_v_lanes, min_sep, lane_step, sign)
-            src_offset = src_x - start[0]
-        if tgt_side in ("left", "right"):
-            sign = -1 if tgt_side == "left" else 1
-            tgt_x_initial = end[0] + sign * ext
-            y_lo = min(detour_y, end[1]); y_hi = max(detour_y, end[1])
-            tgt_x = _find_free_lane(tgt_x_initial, y_lo, y_hi, claimed_v_lanes, min_sep, lane_step, sign)
-            tgt_offset = tgt_x - end[0]
-        return _h_detour(start, end, detour_y, src_side, tgt_side, src_offset, tgt_offset)
+            ordered = [(below_seed, +1, "below"), (above_seed, -1, "above")]
+
+        best_poly: list[Point] | None = None
+        best_hits = float("inf")
+        x_lo = min(start[0], end[0]); x_hi = max(start[0], end[0])
+        for seed_y, bias, _name in ordered:
+            detour_y = _find_free_lane(seed_y, x_lo, x_hi, claimed_h_lanes, min_sep, lane_step, bias)
+            # Try a few outward shifts of detour_y if needed.
+            for extra in range(0, 8):
+                cand_y = detour_y + bias * lane_step * extra
+                src_offset, tgt_offset = 0.0, 0.0
+                if src_side in ("left", "right"):
+                    sign = 1 if src_side == "right" else -1
+                    src_x_init = start[0] + sign * ext
+                    y_lo = min(start[1], cand_y); y_hi = max(start[1], cand_y)
+                    src_x = _find_free_lane(src_x_init, y_lo, y_hi, claimed_v_lanes, min_sep, lane_step, sign)
+                    src_x = _walk_perpendicular(start, cand_y, src_x - start[0], sign, True) + start[0]
+                    src_offset = src_x - start[0]
+                if tgt_side in ("left", "right"):
+                    sign = -1 if tgt_side == "left" else 1
+                    tgt_x_init = end[0] + sign * ext
+                    y_lo = min(cand_y, end[1]); y_hi = max(cand_y, end[1])
+                    tgt_x = _find_free_lane(tgt_x_init, y_lo, y_hi, claimed_v_lanes, min_sep, lane_step, sign)
+                    tgt_x = _walk_perpendicular(end, cand_y, tgt_x - end[0], sign, True) + end[0]
+                    tgt_offset = tgt_x - end[0]
+                poly = _h_detour(start, end, cand_y, src_side, tgt_side, src_offset, tgt_offset)
+                hits = sum(1 for box in obstacles_inflated for a, b in zip(poly, poly[1:]) if _segment_intersects_box(a, b, box))
+                if hits == 0:
+                    return poly
+                if hits < best_hits:
+                    best_hits = hits
+                    best_poly = poly
+        return best_poly
+
+    # Vertical detour (start/end on top/bottom-dominated geometry)
     mid_x = (start[0] + end[0]) / 2
-    left = union_x1 - gap
-    right = union_x2 + gap
-    d_left = abs(mid_x - left)
-    d_right = abs(mid_x - right)
-    lane = _lane(channel_off)
-    if d_left < d_right * 0.66:
-        detour_x = left - lane
-        bias = -1
-    elif d_right < d_left * 0.66:
-        detour_x = right + lane
-        bias = +1
+    left_seed = union_x1 - gap - lane
+    right_seed = union_x2 + gap + lane
+    d_left = abs(mid_x - left_seed); d_right = abs(mid_x - right_seed)
+    if d_left < d_right:
+        ordered_v = [(left_seed, -1, "left"), (right_seed, +1, "right")]
     else:
-        detour_x = right + lane
-        bias = +1
-    y_lo = min(start[1], end[1])
-    y_hi = max(start[1], end[1])
-    detour_x = _find_free_lane(detour_x, y_lo, y_hi, claimed_v_lanes, min_sep, lane_step, bias)
-    src_offset, tgt_offset = 0.0, 0.0
-    if src_side in ("top", "bottom"):
-        sign = 1 if src_side == "bottom" else -1
-        src_y_initial = start[1] + sign * ext
-        x_lo = min(start[0], detour_x); x_hi = max(start[0], detour_x)
-        src_y = _find_free_lane(src_y_initial, x_lo, x_hi, claimed_h_lanes, min_sep, lane_step, sign)
-        src_offset = src_y - start[1]
-    if tgt_side in ("top", "bottom"):
-        sign = -1 if tgt_side == "top" else 1
-        tgt_y_initial = end[1] + sign * ext
-        x_lo = min(detour_x, end[0]); x_hi = max(detour_x, end[0])
-        tgt_y = _find_free_lane(tgt_y_initial, x_lo, x_hi, claimed_h_lanes, min_sep, lane_step, sign)
-        tgt_offset = tgt_y - end[1]
-    return _v_detour(start, end, detour_x, src_side, tgt_side, src_offset, tgt_offset)
+        ordered_v = [(right_seed, +1, "right"), (left_seed, -1, "left")]
+
+    best_poly = None
+    best_hits = float("inf")
+    y_lo = min(start[1], end[1]); y_hi = max(start[1], end[1])
+    for seed_x, bias, _name in ordered_v:
+        detour_x = _find_free_lane(seed_x, y_lo, y_hi, claimed_v_lanes, min_sep, lane_step, bias)
+        for extra in range(0, 8):
+            cand_x = detour_x + bias * lane_step * extra
+            src_offset, tgt_offset = 0.0, 0.0
+            if src_side in ("top", "bottom"):
+                sign = 1 if src_side == "bottom" else -1
+                src_y_init = start[1] + sign * ext
+                x_lo = min(start[0], cand_x); x_hi = max(start[0], cand_x)
+                src_y = _find_free_lane(src_y_init, x_lo, x_hi, claimed_h_lanes, min_sep, lane_step, sign)
+                src_y = _walk_perpendicular(start, cand_x, src_y - start[1], sign, False) + start[1]
+                src_offset = src_y - start[1]
+            if tgt_side in ("top", "bottom"):
+                sign = -1 if tgt_side == "top" else 1
+                tgt_y_init = end[1] + sign * ext
+                x_lo = min(cand_x, end[0]); x_hi = max(cand_x, end[0])
+                tgt_y = _find_free_lane(tgt_y_init, x_lo, x_hi, claimed_h_lanes, min_sep, lane_step, sign)
+                tgt_y = _walk_perpendicular(end, cand_x, tgt_y - end[1], sign, False) + end[1]
+                tgt_offset = tgt_y - end[1]
+            poly = _v_detour(start, end, cand_x, src_side, tgt_side, src_offset, tgt_offset)
+            hits = sum(1 for box in obstacles_inflated for a, b in zip(poly, poly[1:]) if _segment_intersects_box(a, b, box))
+            if hits == 0:
+                return poly
+            if hits < best_hits:
+                best_hits = hits
+                best_poly = poly
+    return best_poly
 
 
 def _h_detour(

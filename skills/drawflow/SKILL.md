@@ -11,6 +11,45 @@ Call `create_diagram_png_download_links` once with one complete `GraphDocument`.
 
 Each download URL points to exactly one PNG file. There are no ZIP, SVG, JSON, PDF, or `.drawio` outputs.
 
+### Tool call signature
+
+```jsonc
+// Tool name: create_diagram_png_download_links
+// Arguments (the GraphDocument is passed under "diagram", NOT at the top level):
+{
+  "diagram": { /* GraphDocument — see "GraphDocument Shape" below */ },
+  "output": {                                            // optional
+    "graph":   { "width": 2200, "height": 1300, "scale": 1 },
+    "details": {
+      "width": 1500,
+      "maxHeight": 7000,                                 // 800 ≤ value ≤ 24000
+      "scale": 1,
+      "layout": "cards",
+      "autoGrow": false                                  // see below
+    }
+  }
+}
+```
+
+When `output.details.autoGrow` is `true`, the details canvas grows tall enough to fit every card (no truncation) — `maxHeight` becomes a *minimum* instead of a hard cap. Use this when the diagram has rich `detail` prose and you don't want to retry-with-bigger-maxHeight. There is still a 24000-logical-px absolute ceiling.
+
+### Tool result shape
+
+```jsonc
+{
+  "status": "ready",                            // or absent on isError
+  "downloads": [
+    { "role": "graph",   "artifactId": "dg_…", "format": "png", "url": "http://…/dg_….png", "contentType": "image/png", "image": { "width": 2200, "height": 1300, "scale": 1 } },
+    { "role": "details", "artifactId": "dg_…", "format": "png", "url": "http://…/dg_….png", "contentType": "image/png", "image": { "width": 1500, "height": 7000, "scale": 1 } }
+  ],
+  "warnings": [ /* e.g. details-truncation notice; non-fatal */ ]
+}
+```
+
+Pick the URL by role (`r["role"] == "graph"` / `"details"`); do not assume order. If the call fails, the result is `{"isError": true, "code": "...", "message": "...", "details": [...]}` instead.
+
+If you get a `details PNG was truncated` warning, either pass `output.details.autoGrow: true` and retry (preferred — the canvas grows to fit), or raise `output.details.maxHeight` (e.g., `8000`–`12000`) and retry.
+
 ## How the rendering works (so you can author for it)
 
 DrawFlow renders through a custom **Pillow + grandalf** pipeline (compound Sugiyama layout, port-based orthogonal edge routing, channel/lane allocation, crossing-edge color retinting). That has implications for what to expect:
