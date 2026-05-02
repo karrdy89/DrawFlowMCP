@@ -12,17 +12,5 @@ services:
     volumes:
       - drawflow-artifacts:/data/artifacts
 
-  drawflow-stdio:
-    build: .
-    profiles:
-      - stdio
-    command: ["python", "-m", "drawflow_mcp.server", "--transport", "stdio"]
-    stdin_open: true
-    environment:
-      DRAWFLOW_PUBLIC_BASE_URL: "http://127.0.0.1:8765"
-      DRAWFLOW_ARTIFACT_DIR: "/data/artifacts"
-    volumes:
-      - drawflow-artifacts:/data/artifacts
-
 volumes:
   drawflow-artifacts:
