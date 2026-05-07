@@ -4,7 +4,7 @@
 
 **Plug-in architecture-diagram generation for agents.** DrawFlow MCP exposes a single MCP tool that turns a declarative graph document into a clean, ready-to-share architecture PNG plus a markdown-rendered details sheet. The authoring rules, layout engine, edge router, and download endpoints all ship in one server — point your agent at it and ask for a diagram.
 
-![KEDA autoscaling architecture](artifacts/e2e_keda_autogrow_graph.png)
+![KEDA autoscaling architecture](docs/images/e2e_keda_autogrow_graph.png)
 
 ## Why
 
